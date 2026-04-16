@@ -1,0 +1,6 @@
+{
+  "name": "VoxelGen AI",
+  "description": "Convert images into 3D voxel models and export them to .vox (MagicaVoxel) format using Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
