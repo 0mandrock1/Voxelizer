@@ -16,7 +16,9 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState<"idle" | "analyzing" | "voxelizing" | "finalizing">("idle");
+  const [logStep, setLogStep] = useState(0);
   const [voxelData, setVoxelData] = useState<VoxelData | null>(null);
+  const [cullInterior, setCullInterior] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,38 +51,86 @@ export default function App() {
 
     setIsProcessing(true);
     setProgress(0);
+    setLogStep(0);
     setStage("analyzing");
     setError(null);
 
     // Simulate progress
     const progressInterval = setInterval(() => {
       setProgress(prev => {
-        if (prev < 30) return prev + 2;
-        if (prev < 70 && stage === "voxelizing") return prev + 1;
-        if (prev < 95 && stage === "finalizing") return prev + 0.5;
+        if (prev < 30) return prev + 1.5;
+        if (prev < 85 && stage === "voxelizing") return prev + 0.3;
+        if (prev < 98 && stage === "finalizing") return prev + 0.1;
         return prev;
       });
     }, 100);
+
+    const logInterval = setInterval(() => {
+      setLogStep(prev => prev + 1);
+    }, 2500);
 
     try {
       const base64Data = image.split(",")[1];
       
       // Stage 1: Analyzing
-      setTimeout(() => setStage("voxelizing"), 1500);
+      setStage("analyzing");
       
-      const data = await generateVoxelFromImage(base64Data, mimeType);
+      const dataPromise = generateVoxelFromImage(base64Data, mimeType);
+      
+      // After a short delay, move to voxelizing stage
+      const stageTimeout = setTimeout(() => {
+        setStage("voxelizing");
+      }, 2500);
+      
+      const data = await dataPromise;
+      clearTimeout(stageTimeout);
       
       // Stage 2: Finalizing
       setStage("finalizing");
       setProgress(90);
+
+      let processedData = data;
+      if (cullInterior) {
+        // Optimization: Remove voxels that are completely surrounded by other voxels
+        const voxelSet = new Set(data.voxels.map(v => `${v.x},${v.y},${v.z}`));
+        processedData = {
+          ...data,
+          voxels: data.voxels.filter(v => {
+            const neighbors = [
+              [1, 0, 0], [-1, 0, 0],
+              [0, 1, 0], [0, -1, 0],
+              [0, 0, 1], [0, 0, -1]
+            ];
+            const isSurrounded = neighbors.every(([dx, dy, dz]) => 
+              voxelSet.has(`${v.x + dx},${v.y + dy},${v.z + dz}`)
+            );
+            return !isSurrounded;
+          })
+        };
+      }
       
-      setVoxelData(data);
+      setVoxelData(processedData);
       setProgress(100);
     } catch (err) {
       console.error(err);
-      setError("Failed to process image. Please try again.");
+      let errorMessage = "Failed to process image. ";
+      
+      if (err instanceof Error) {
+        if (err.message.includes("404")) {
+          errorMessage += "The AI model is currently unavailable. Please try again in a few moments.";
+        } else if (err.message.includes("safety")) {
+          errorMessage += "The image was flagged by safety filters. Please try a different image.";
+        } else if (err.message.includes("quota")) {
+          errorMessage += "API quota exceeded. Please wait a bit before retrying.";
+        } else {
+          errorMessage += "Please ensure the image is clear and the object is well-lit.";
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       clearInterval(progressInterval);
+      clearInterval(logInterval);
       setIsProcessing(false);
       setStage("idle");
     }
@@ -114,17 +164,34 @@ export default function App() {
     setError(null);
   };
 
+  const loadSample = async (url: string) => {
+    setIsImageLoading(true);
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setImage(base64);
+        setMimeType(blob.type);
+        setVoxelData(null);
+        setError(null);
+        setIsImageLoading(false);
+      };
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to load sample image.");
+      setIsImageLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-bg-base text-text-primary font-sans flex flex-col">
       {/* Header */}
       <header className="h-16 border-b border-border-theme flex items-center justify-between px-6 shrink-0">
         <div className="font-serif italic text-xl tracking-[2px] text-accent uppercase">
           Voxelize.io
-        </div>
-        <div className="flex gap-5">
-          <button className="text-text-secondary text-sm uppercase tracking-wider hover:text-text-primary transition-colors">Settings</button>
-          <button className="text-text-secondary text-sm uppercase tracking-wider hover:text-text-primary transition-colors">Documentation</button>
-          <button className="text-text-secondary text-sm uppercase tracking-wider hover:text-text-primary transition-colors">Account</button>
         </div>
       </header>
 
@@ -188,14 +255,39 @@ export default function App() {
           )}
 
           <div className="mt-10">
-            <h2 className="font-serif text-[12px] uppercase text-text-secondary mb-4 tracking-wider">Recent Sessions</h2>
+            <h2 className="font-serif text-[12px] uppercase text-text-secondary mb-4 tracking-wider">Sample Assets</h2>
             <div className="space-y-4">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="flex gap-3 items-center opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all cursor-not-allowed">
-                  <div className="w-10 h-10 bg-bg-control rounded-sm shrink-0" />
+              {[
+                { 
+                  name: "Modern_Chair.png", 
+                  size: "64x64", 
+                  weight: "1.2MB",
+                  url: "https://images.unsplash.com/photo-1592078615290-033ee584e267?auto=format&fit=crop&q=80&w=300&h=300"
+                },
+                { 
+                  name: "Fantasy_Sword.png", 
+                  size: "32x32", 
+                  weight: "0.8MB",
+                  url: "https://images.unsplash.com/photo-1589652717521-10c0d092dea9?auto=format&fit=crop&q=80&w=300&h=300"
+                },
+                { 
+                  name: "Retro_Console.png", 
+                  size: "128x128", 
+                  weight: "3.5MB",
+                  url: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?auto=format&fit=crop&q=80&w=300&h=300"
+                }
+              ].map((asset, i) => (
+                <div 
+                  key={i} 
+                  className="flex gap-3 items-center opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all cursor-pointer group"
+                  onClick={() => loadSample(asset.url)}
+                >
+                  <div className="w-10 h-10 bg-bg-control rounded-sm shrink-0 flex items-center justify-center overflow-hidden border border-border-theme group-hover:border-accent transition-colors">
+                    <img src={asset.url} alt={asset.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
                   <div className="overflow-hidden">
-                    <p className="text-[12px] truncate">Session_Asset_0{i}.png</p>
-                    <span className="text-[10px] text-text-secondary">128x128 &bull; 2.4MB</span>
+                    <p className="text-[12px] truncate group-hover:text-accent transition-colors">{asset.name}</p>
+                    <span className="text-[10px] text-text-secondary">{asset.size} &bull; {asset.weight}</span>
                   </div>
                 </div>
               ))}
@@ -244,6 +336,74 @@ export default function App() {
                   <span className={stage === "voxelizing" ? "text-accent" : ""}>Voxelize</span>
                   <span className={stage === "finalizing" ? "text-accent" : ""}>Export</span>
                 </div>
+
+                {/* Model Log */}
+                <div className="mt-8 bg-black/40 p-4 rounded border border-border-theme text-left font-mono text-[10px] space-y-1 h-32 overflow-hidden relative">
+                  <div className="text-accent/60 mb-2 uppercase tracking-widest border-b border-border-theme pb-1">Neural_Log_Stream</div>
+                  <AnimatePresence mode="popLayout">
+                    {stage === "analyzing" && (
+                      <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} key="log1">
+                        &gt; [INFO] Initializing visual buffer...<br />
+                        &gt; [INFO] Detecting primary object contours...<br />
+                        &gt; [INFO] Scene class: {mimeType.split('/')[1].toUpperCase()}_DATA<br />
+                        &gt; [INFO] Calculating spatial orientation...
+                      </motion.div>
+                    )}
+                    {stage === "voxelizing" && (
+                      <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} key={`log-v-${logStep}`}>
+                        {logStep % 5 === 0 && (
+                          <>
+                            &gt; [DATA] Mapping pixels to 3D grid...<br />
+                            &gt; [DATA] Extruding volumetric depth (Y-axis)...<br />
+                            &gt; [DATA] Sampling color palette (256 slots)...<br />
+                            &gt; [DATA] Verifying structural integrity...
+                          </>
+                        )}
+                        {logStep % 5 === 1 && (
+                          <>
+                            &gt; [NEURAL] Analyzing spatial relationships...<br />
+                            &gt; [NEURAL] Refining object silhouette...<br />
+                            &gt; [NEURAL] Calculating occlusion maps...<br />
+                            &gt; [NEURAL] Optimizing voxel density...
+                          </>
+                        )}
+                        {logStep % 5 === 2 && (
+                          <>
+                            &gt; [SCAN] Processing micro-details...<br />
+                            &gt; [SCAN] Detecting hollow regions...<br />
+                            &gt; [SCAN] Aligning symmetry planes...<br />
+                            &gt; [SCAN] Validating mesh manifold...
+                          </>
+                        )}
+                        {logStep % 5 === 3 && (
+                          <>
+                            &gt; [CORE] Executing depth-first traversal...<br />
+                            &gt; [CORE] Applying volumetric shading...<br />
+                            &gt; [CORE] Reconstructing hidden surfaces...<br />
+                            &gt; [CORE] Finalizing neural weights...
+                          </>
+                        )}
+                        {logStep % 5 === 4 && (
+                          <>
+                            &gt; [SYNC] Buffering reconstruction data...<br />
+                            &gt; [SYNC] Waiting for API stream response...<br />
+                            &gt; [SYNC] Processing high-fidelity layers...<br />
+                            &gt; [SYNC] Almost there, finalizing voxels...
+                          </>
+                        )}
+                      </motion.div>
+                    )}
+                    {stage === "finalizing" && (
+                      <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} key="log3">
+                        &gt; [PROC] Culling interior faces: {cullInterior ? "ENABLED" : "DISABLED"}<br />
+                        &gt; [PROC] Finalizing voxel mesh...<br />
+                        &gt; [PROC] Generating .VOX binary stream...<br />
+                        &gt; [SUCCESS] Reconstruction complete.
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                  <div className="absolute bottom-2 right-2 w-1 h-1 bg-accent animate-pulse rounded-full" />
+                </div>
               </div>
             </div>
           )}
@@ -284,19 +444,29 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] uppercase text-text-secondary tracking-wider">Color Quantization</label>
-              <select className="bg-bg-control border border-border-theme text-text-primary p-2 w-full text-[12px] rounded outline-none focus:border-accent transition-colors">
-                <option>256 Colors (Optimized)</option>
-                <option>128 Colors (Stylized)</option>
-                <option>64 Colors (Lo-Fi)</option>
-              </select>
+              <label className="text-[10px] uppercase text-text-secondary tracking-wider">Color Palette</label>
+              <div className="bg-bg-control border border-border-theme text-text-primary p-3 w-full text-[11px] rounded flex flex-col gap-1">
+                <span className="text-accent font-bold">AUTOMATIC (MINIMAL)</span>
+                <span className="text-text-secondary/60 text-[9px]">The engine now automatically selects the smallest necessary palette for clean results.</span>
+              </div>
             </div>
 
-            <div className="pt-4">
-              <label className="text-[10px] uppercase text-text-secondary tracking-wider mb-3 block">Optimization</label>
-              <div className="flex gap-3 items-center">
-                <input type="checkbox" defaultChecked className="accent-accent w-4 h-4" />
-                <span className="text-[12px] text-text-secondary">Cull Interior Faces</span>
+            <div className="pt-4 border-t border-border-theme/30">
+              <label className="text-[10px] uppercase text-text-secondary tracking-wider mb-2 block">Geometry Optimization</label>
+              <div className="flex gap-3 items-start">
+                <input 
+                  type="checkbox" 
+                  id="cull-interior"
+                  checked={cullInterior} 
+                  onChange={(e) => setCullInterior(e.target.checked)}
+                  className="accent-accent w-4 h-4 cursor-pointer mt-0.5" 
+                />
+                <label htmlFor="cull-interior" className="flex flex-col gap-1 cursor-pointer">
+                  <span className="text-[12px] text-text-primary">Optimize Internal Mesh</span>
+                  <span className="text-[10px] text-text-secondary/60 leading-relaxed">
+                    Removes hidden internal voxels. Recommended for 3D printing and smaller file sizes.
+                  </span>
+                </label>
               </div>
             </div>
           </div>
@@ -312,12 +482,10 @@ export default function App() {
         </section>
       </main>
 
-      <footer className="h-10 bg-bg-base border-t border-border-theme flex items-center px-6 justify-between text-[10px] text-text-secondary shrink-0">
-        <div className="flex items-center">
-          <span className="w-1.5 h-1.5 bg-green-500 rounded-full mr-2 shadow-[0_0_5px_rgba(34,197,94,0.5)]"></span>
-          Engine Ready: Neural_Voxel_v2.4
+      <footer className="h-10 bg-bg-base border-t border-border-theme flex items-center px-6 justify-center text-[10px] text-text-secondary shrink-0">
+        <div className="tracking-[0.3em] uppercase opacity-50">
+          Voxelize.io &copy; 2026 &bull; Neural Reconstruction Engine
         </div>
-        <div>Current Project: Unnamed_Asset_01 &nbsp; | &nbsp; {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
       </footer>
     </div>
   );

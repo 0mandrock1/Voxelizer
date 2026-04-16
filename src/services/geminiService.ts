@@ -17,18 +17,38 @@ export async function generateVoxelFromImage(base64Image: string, mimeType: stri
       {
         parts: [
           {
-            text: `Analyze this image and convert it into a 3D voxel model. 
-            The output must be a JSON object representing a voxel grid (max 32x32x32).
-            
-            Return a JSON object with:
-            - width, height, depth (integers, max 32)
-            - voxels: array of {x, y, z, colorIndex}. colorIndex should be 1-based (1 to 255).
-            - palette: array of 256 {r, g, b, a} objects. Index 0 is reserved for empty space (but you should provide 256 entries, where index 0 is usually black/transparent).
-            
-            Try to capture the main shape and colors of the object in the image. 
-            If it's a 2D image, try to give it some depth (e.g., 2-5 voxels thick) or interpret it as a 3D object if possible.
-            
-            IMPORTANT: The response MUST be ONLY the JSON object.`,
+            text: `You are a Hybrid 3D Voxel Artist and Architect. Your goal is to reconstruct the object in the image as a high-fidelity 3D model (max 32x32x32) that balances structural integrity with intricate surface detail.
+
+### CORE STRATEGY: STRUCTURAL FOUNDATION
+- **Geometric Primitives**: First, identify the core structure (planes, cylinders, lines). Align these to the X, Y, and Z axes for stability.
+- **Axis Alignment**: Ensure vertical elements (legs, walls) are perfectly aligned to the Z-axis.
+- **Manifold Shell**: Build a solid outer shell. Avoid "holes" unless they are part of the object's design.
+
+### DETAIL STRATEGY: SURFACE & TEXTURE
+- **Intricate Patterns**: If the object has surface patterns (engravings, logos, textures), represent them with 1-voxel precision. Do NOT simplify these into flat colors.
+- **Complex Geometry**: For non-geometric parts (ornaments, organic shapes), use a higher density of voxels to capture the unique silhouette. Avoid "blocky" approximations for curved or detailed edges.
+- **Micro-Detail**: Capture fine features like buttons, wires, or small protrusions as distinct elements.
+
+### COLOR & TEXTURE FIDELITY
+- **Adaptive Palette**: Use a minimal base palette for structure, but expand it to capture intricate patterns and material textures.
+- **Texture Mapping**: Use color variations to represent physical textures (e.g., the weave of fabric, the grain of wood, or metallic sheen).
+- **Clean Contrast**: Ensure patterns are sharp and distinct, not "muddy" or blurred.
+
+### RECONSTRUCTION STEPS:
+1. **Skeleton**: Build the primary structural frame.
+2. **Surface Shell**: Wrap the frame in a detailed surface layer, capturing all intricate patterns.
+3. **Detail Pass**: Add micro-features and refine the silhouette for smoother transitions.
+4. **Critique**: Ensure the model isn't overly simplified; if a pattern is visible in the image, it must be visible in the voxels.
+
+### OUTPUT SPECIFICATIONS:
+Return a JSON object:
+- \`width\`, \`height\`, \`depth\`: Integers (max 32).
+- \`voxels\`: Array of \`{x, y, z, colorIndex}\`.
+- \`palette\`: Array of exactly 256 \`{r, g, b, a}\` objects. Index 0 is transparent {0,0,0,0}.
+
+### CONSTRAINTS:
+- Target voxel count: 1200-2200 for complex objects.
+- Output ONLY the JSON object.`,
           },
           {
             inlineData: {
