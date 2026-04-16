@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoxelPreview } from "./components/VoxelPreview";
-import { generateVoxelFromImage, VoxelData } from "./services/geminiService";
+import { generateVoxelFromImage, VoxelData, DetailLevel, MaterialFocus } from "./services/geminiService";
 import { exportToVox } from "./lib/vox-exporter";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -19,6 +19,8 @@ export default function App() {
   const [logStep, setLogStep] = useState(0);
   const [voxelData, setVoxelData] = useState<VoxelData | null>(null);
   const [cullInterior, setCullInterior] = useState(true);
+  const [detailLevel, setDetailLevel] = useState<DetailLevel>("medium");
+  const [materialFocus, setMaterialFocus] = useState<MaterialFocus>("general");
   const [error, setError] = useState<string | null>(null);
 
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -75,7 +77,10 @@ export default function App() {
       // Stage 1: Analyzing
       setStage("analyzing");
       
-      const dataPromise = generateVoxelFromImage(base64Data, mimeType);
+      const dataPromise = generateVoxelFromImage(base64Data, mimeType, {
+        detailLevel,
+        materialFocus
+      });
       
       // After a short delay, move to voxelizing stage
       const stageTimeout = setTimeout(() => {
@@ -419,8 +424,10 @@ export default function App() {
           )}
 
           <div className="absolute top-6 right-6 flex gap-2">
-             <div className="bg-black/50 px-3 py-2 rounded border border-border-theme text-[11px] uppercase tracking-wider backdrop-blur-md cursor-default">Orbit</div>
-             <div className="bg-black/50 px-3 py-2 rounded border border-border-theme text-[11px] uppercase tracking-wider backdrop-blur-md cursor-default opacity-50">Wireframe</div>
+             <div className="bg-black/50 px-3 py-2 rounded border border-border-theme text-[11px] uppercase tracking-wider backdrop-blur-md cursor-default flex items-center gap-2">
+               <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+               Orbit Mode
+             </div>
           </div>
         </section>
 
@@ -430,17 +437,30 @@ export default function App() {
           
           <div className="space-y-6">
             <div className="space-y-2">
-              <label className="text-[10px] uppercase text-text-secondary tracking-wider">Voxel Size</label>
-              <div className="h-[2px] bg-border-theme relative my-2.5">
-                <div className="w-2.5 h-2.5 bg-accent absolute top-[-4px] left-[30%] rounded-full shadow-[0_0_10px_rgba(212,180,131,0.5)]" />
-              </div>
+              <label className="text-[10px] uppercase text-text-secondary tracking-wider">Detail Density</label>
+              <select 
+                value={detailLevel}
+                onChange={(e) => setDetailLevel(e.target.value as DetailLevel)}
+                className="bg-bg-control border border-border-theme text-text-primary p-2 w-full text-[12px] rounded outline-none focus:border-accent transition-colors"
+              >
+                <option value="low">Low (Fast, 1K voxels)</option>
+                <option value="medium">Medium (Balanced, 2K voxels)</option>
+                <option value="high">High (Intricate, 3K+ voxels)</option>
+              </select>
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] uppercase text-text-secondary tracking-wider">Depth Sensitivity</label>
-              <div className="h-[2px] bg-border-theme relative my-2.5">
-                <div className="w-2.5 h-2.5 bg-accent absolute top-[-4px] left-[75%] rounded-full shadow-[0_0_10px_rgba(212,180,131,0.5)]" />
-              </div>
+              <label className="text-[10px] uppercase text-text-secondary tracking-wider">Material Focus</label>
+              <select 
+                value={materialFocus}
+                onChange={(e) => setMaterialFocus(e.target.value as MaterialFocus)}
+                className="bg-bg-control border border-border-theme text-text-primary p-2 w-full text-[12px] rounded outline-none focus:border-accent transition-colors"
+              >
+                <option value="general">General (Balanced)</option>
+                <option value="metallic">Metallic (Sharp, Specular)</option>
+                <option value="organic">Organic (Smooth, Natural)</option>
+                <option value="textile">Textile (Patterned, Soft)</option>
+              </select>
             </div>
 
             <div className="space-y-2">
