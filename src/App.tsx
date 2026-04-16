@@ -1,16 +1,19 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Upload, Download, Box, Loader2, Image as ImageIcon, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { VoxelPreview } from "./components/VoxelPreview";
-import { generateVoxelFromImage, VoxelData, DetailLevel, MaterialFocus } from "./services/geminiService";
+import { generateVoxelFromImage, generateVoxelFromText, VoxelData, DetailLevel, MaterialFocus } from "./services/geminiService";
 import { exportToVox } from "./lib/vox-exporter";
 import { motion, AnimatePresence } from "motion/react";
+import { Type, Sparkles } from "lucide-react";
 
 export default function App() {
   const [image, setImage] = useState<string | null>(null);
+  const [textPrompt, setTextPrompt] = useState("");
+  const [mode, setMode] = useState<"image" | "text">("image");
   const [mimeType, setMimeType] = useState<string>("");
   const [isImageLoading, setIsImageLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -21,7 +24,25 @@ export default function App() {
   const [cullInterior, setCullInterior] = useState(true);
   const [detailLevel, setDetailLevel] = useState<DetailLevel>("medium");
   const [materialFocus, setMaterialFocus] = useState<MaterialFocus>("general");
+  const [history, setHistory] = useState<{ image: string; data: VoxelData; timestamp: number }[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Load history on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem("voxel_history");
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error("Failed to load history", e);
+      }
+    }
+  }, []);
+
+  // Save history when it changes
+  useEffect(() => {
+    localStorage.setItem("voxel_history", JSON.stringify(history.slice(0, 5)));
+  }, [history]);
 
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -42,13 +63,16 @@ export default function App() {
   }, []);
 
   const processImage = async () => {
-    if (!image) return;
+    if (mode === "image" && !image) return;
+    if (mode === "text" && !textPrompt.trim()) return;
     
-    // Validate MIME type
-    const supportedTypes = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
-    if (!supportedTypes.includes(mimeType)) {
-      setError(`Unsupported image type: ${mimeType}. Please use PNG, JPG, or WEBP.`);
-      return;
+    if (mode === "image") {
+      // Validate MIME type
+      const supportedTypes = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
+      if (!supportedTypes.includes(mimeType)) {
+        setError(`Unsupported image type: ${mimeType}. Please use PNG, JPG, or WEBP.`);
+        return;
+      }
     }
 
     setIsProcessing(true);
@@ -72,15 +96,22 @@ export default function App() {
     }, 2500);
 
     try {
-      const base64Data = image.split(",")[1];
+      let dataPromise;
+      if (mode === "image" && image) {
+        const base64Data = image.split(",")[1];
+        dataPromise = generateVoxelFromImage(base64Data, mimeType, {
+          detailLevel,
+          materialFocus
+        });
+      } else {
+        dataPromise = generateVoxelFromText(textPrompt, {
+          detailLevel,
+          materialFocus
+        });
+      }
       
       // Stage 1: Analyzing
       setStage("analyzing");
-      
-      const dataPromise = generateVoxelFromImage(base64Data, mimeType, {
-        detailLevel,
-        materialFocus
-      });
       
       // After a short delay, move to voxelizing stage
       const stageTimeout = setTimeout(() => {
@@ -115,6 +146,11 @@ export default function App() {
       }
       
       setVoxelData(processedData);
+      
+      // Add to history
+      const historyImage = mode === "image" ? image! : `https://picsum.photos/seed/${encodeURIComponent(textPrompt)}/300/300`;
+      setHistory(prev => [{ image: historyImage, data: processedData, timestamp: Date.now() }, ...prev].slice(0, 5));
+      
       setProgress(100);
     } catch (err) {
       console.error(err);
@@ -203,42 +239,72 @@ export default function App() {
       <main className="flex-1 grid grid-cols-[280px_1fr_240px] divide-x divide-border-theme bg-border-theme">
         {/* Left Sidebar: Assets & Input */}
         <section className="bg-bg-base p-6 flex flex-col overflow-y-auto">
-          <h2 className="font-serif text-[12px] uppercase text-text-secondary mb-6 tracking-wider">Source Image</h2>
+          <div className="flex gap-1 bg-bg-control p-1 rounded mb-6 border border-border-theme">
+            <button 
+              onClick={() => setMode("image")}
+              className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition-all ${mode === "image" ? "bg-bg-base text-accent shadow-sm" : "text-text-secondary hover:text-text-primary"}`}
+            >
+              <ImageIcon className="w-3 h-3" />
+              Image
+            </button>
+            <button 
+              onClick={() => setMode("text")}
+              className={`flex-1 flex items-center justify-center gap-2 py-1.5 rounded text-[10px] uppercase tracking-wider transition-all ${mode === "text" ? "bg-bg-base text-accent shadow-sm" : "text-text-secondary hover:text-text-primary"}`}
+            >
+              <Type className="w-3 h-3" />
+              Text
+            </button>
+          </div>
+
+          <h2 className="font-serif text-[12px] uppercase text-text-secondary mb-6 tracking-wider">
+            {mode === "image" ? "Source Image" : "Text Prompt"}
+          </h2>
           
-          {!image ? (
-            <label className="border border-dashed border-border-theme bg-bg-surface rounded flex flex-col items-center justify-center p-8 cursor-pointer hover:bg-bg-surface/80 transition-all mb-6 group h-48 relative overflow-hidden">
-              {isImageLoading ? (
-                <div className="flex flex-col items-center animate-pulse">
-                  <Loader2 className="w-6 h-6 text-accent animate-spin mb-3" />
-                  <span className="text-[10px] text-text-secondary uppercase tracking-widest">Reading File...</span>
+          {mode === "image" ? (
+            !image ? (
+              <label className="border border-dashed border-border-theme bg-bg-surface rounded flex flex-col items-center justify-center p-8 cursor-pointer hover:bg-bg-surface/80 transition-all mb-6 group h-48 relative overflow-hidden">
+                {isImageLoading ? (
+                  <div className="flex flex-col items-center animate-pulse">
+                    <Loader2 className="w-6 h-6 text-accent animate-spin mb-3" />
+                    <span className="text-[10px] text-text-secondary uppercase tracking-widest">Reading File...</span>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="w-6 h-6 text-text-secondary group-hover:text-accent mb-3 transition-colors" />
+                    <span className="text-[11px] text-text-secondary uppercase tracking-wider">Drag & Drop File</span>
+                  </>
+                )}
+                <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={handleImageUpload} disabled={isImageLoading} />
+              </label>
+            ) : (
+              <div className="relative group mb-6">
+                <img 
+                  src={image} 
+                  alt="Source" 
+                  className="w-full h-48 object-contain rounded bg-bg-surface border border-border-theme"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded">
+                  <Button variant="destructive" size="icon" onClick={clearImage}>
+                    <Trash2 className="w-5 h-5" />
+                  </Button>
                 </div>
-              ) : (
-                <>
-                  <Upload className="w-6 h-6 text-text-secondary group-hover:text-accent mb-3 transition-colors" />
-                  <span className="text-[11px] text-text-secondary uppercase tracking-wider">Drag & Drop File</span>
-                </>
-              )}
-              <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp,image/heic,image/heif" onChange={handleImageUpload} disabled={isImageLoading} />
-            </label>
-          ) : (
-            <div className="relative group mb-6">
-              <img 
-                src={image} 
-                alt="Source" 
-                className="w-full h-48 object-contain rounded bg-bg-surface border border-border-theme"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded">
-                <Button variant="destructive" size="icon" onClick={clearImage}>
-                  <Trash2 className="w-5 h-5" />
-                </Button>
               </div>
+            )
+          ) : (
+            <div className="mb-6 space-y-3">
+              <textarea 
+                value={textPrompt}
+                onChange={(e) => setTextPrompt(e.target.value)}
+                placeholder="Describe your object (e.g., 'A futuristic cybernetic helmet with glowing blue visors')"
+                className="w-full h-32 bg-bg-surface border border-border-theme rounded p-3 text-[12px] text-text-primary outline-none focus:border-accent transition-colors resize-none placeholder:text-text-secondary/30"
+              />
             </div>
           )}
 
-          {image && !voxelData && (
+          {(image || (mode === "text" && textPrompt.trim())) && !voxelData && (
             <button 
-              className="bg-accent text-black py-3.5 px-4 w-full font-semibold uppercase text-[12px] tracking-wider rounded cursor-pointer hover:opacity-90 disabled:opacity-50 transition-all"
+              className="bg-accent text-black py-3.5 px-4 w-full font-semibold uppercase text-[12px] tracking-wider rounded cursor-pointer hover:opacity-90 disabled:opacity-50 transition-all shadow-[0_0_20px_rgba(212,180,131,0.2)]"
               onClick={processImage}
               disabled={isProcessing}
             >
@@ -248,7 +314,10 @@ export default function App() {
                   Processing...
                 </span>
               ) : (
-                "Generate Voxel Model"
+                <span className="flex items-center justify-center gap-2">
+                  <Sparkles className="w-4 h-4" />
+                  Generate Voxel Model
+                </span>
               )}
             </button>
           )}
@@ -259,7 +328,36 @@ export default function App() {
             </p>
           )}
 
-          <div className="mt-10">
+          <div className="mt-10 flex-1 flex flex-col min-h-0">
+            <h2 className="font-serif text-[12px] uppercase text-text-secondary mb-4 tracking-wider">Recent History</h2>
+            {history.length > 0 ? (
+              <ScrollArea className="flex-1 -mx-2 px-2">
+                <div className="grid grid-cols-2 gap-2">
+                  {history.map((item, i) => (
+                    <button 
+                      key={item.timestamp}
+                      onClick={() => {
+                        setImage(item.image);
+                        setVoxelData(item.data);
+                      }}
+                      className="aspect-square bg-bg-surface border border-border-theme rounded overflow-hidden hover:border-accent transition-all group relative"
+                    >
+                      <img src={item.image} alt={`History ${i}`} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+                      <div className="absolute bottom-1 right-1 bg-black/80 text-[8px] px-1 rounded text-accent">
+                        {item.data.voxels.length}V
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </ScrollArea>
+            ) : (
+              <div className="flex-1 flex items-center justify-center border border-dashed border-border-theme rounded p-4 text-center">
+                <p className="text-[10px] text-text-secondary/40 uppercase tracking-widest">No history yet</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-8">
             <h2 className="font-serif text-[12px] uppercase text-text-secondary mb-4 tracking-wider">Sample Assets</h2>
             <div className="space-y-4">
               {[
@@ -350,7 +448,7 @@ export default function App() {
                       <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} key="log1">
                         &gt; [INFO] Initializing visual buffer...<br />
                         &gt; [INFO] Detecting primary object contours...<br />
-                        &gt; [INFO] Scene class: {mimeType.split('/')[1].toUpperCase()}_DATA<br />
+                        &gt; [INFO] Scene class: {(mimeType.split('/')[1] || "GENERIC").toUpperCase()}_DATA<br />
                         &gt; [INFO] Calculating spatial orientation...
                       </motion.div>
                     )}
